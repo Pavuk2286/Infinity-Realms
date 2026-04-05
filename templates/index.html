@@ -9,17 +9,42 @@
 <body>
     <div class="scanlines"></div>
     <div class="container">
-        <!-- Visual Zone -->
-        <div class="visual-zone">
-            <img id="location-image" src="" alt="Location" class="location-image">
-            <div class="image-overlay">DaMS v1.0</div>
-        </div>
-
-        <!-- Narrative Log -->
-        <div class="narrative-log" id="narrative-log">
-            <div class="log-entry system">
-                <span class="timestamp">[SYSTEM]</span> DaMS загружен. Ожидание команды...
+        <!-- Grid Layout: sidebars span image+chat -->
+        <div class="grid-layout">
+            <!-- Left sidebar: inventory -->
+            <div class="sidebar-left">
+                <span class="section-title">📦 ИНВЕНТАРЬ:</span>
+                <div id="inventory-list" class="item-list">
+                    <span class="empty-msg">Пусто</span>
+                </div>
             </div>
+
+            <!-- Center top: image -->
+            <div class="visual-zone">
+                <img id="location-image" src="" alt="Location" class="location-image">
+                <div class="image-overlay">DaMS v1.0</div>
+            </div>
+
+            <!-- Right sidebar: effects -->
+            <div class="sidebar-right">
+                <span class="section-title">⚡ ЭФФЕКТЫ:</span>
+                <div id="effects-list" class="item-list">
+                    <span class="empty-msg">Нет</span>
+                </div>
+            </div>
+
+            <!-- Spacer -->
+            <div></div>
+
+            <!-- Center bottom: chat -->
+            <div class="narrative-log" id="narrative-log">
+                <div class="log-entry system">
+                    <span class="timestamp">[SYSTEM]</span> DaMS загружен. Ожидание команды...
+                </div>
+            </div>
+
+            <!-- Spacer -->
+            <div></div>
         </div>
 
         <!-- Action Suggestions -->
@@ -32,22 +57,6 @@
             <span class="prompt-symbol">&gt;</span>
             <input type="text" id="action-input" placeholder="Введите действие..." autocomplete="off">
             <button id="send-btn" class="send-btn">↵</button>
-        </div>
-
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <div class="inventory-section">
-                <span class="section-title">📦 ИНВЕНТАРЬ:</span>
-                <div id="inventory-list" class="item-list">
-                    <span class="empty-msg">Пусто</span>
-                </div>
-            </div>
-            <div class="effects-section">
-                <span class="section-title">⚡ ЭФФЕКТЫ:</span>
-                <div id="effects-list" class="item-list">
-                    <span class="empty-msg">Нет</span>
-                </div>
-            </div>
         </div>
     </div>
 

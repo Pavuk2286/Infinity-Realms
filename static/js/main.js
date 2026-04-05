@@ -22,6 +22,9 @@ let gameState = {
 document.addEventListener('DOMContentLoaded', () => {
     addLogEntry('[SYSTEM]', 'DaMS готов. Напиши "начать игру" или нажми на кнопку.', 'system');
 
+    // Генерируем начальную картинку — старый терминал
+    updateLocationImage('old cracked computer terminal');
+
     // Обработчики событий
     sendBtn.addEventListener('click', sendAction);
     actionInput.addEventListener('keypress', (e) => {
@@ -177,12 +180,22 @@ function updateEffects(effects) {
 
 // Обновление изображения локации
 function updateLocationImage(prompt) {
-    // Используем Pollinations.ai для генерации изображений
-    const encodedPrompt = encodeURIComponent(prompt);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=800&height=400&seed=${Date.now()}`;
-    
+    // Запрашиваем картинку через наш сервер (обход CORS)
+    const imageUrl = `/api/image?prompt=${encodeURIComponent(prompt)}`;
+
+    locationImage.style.opacity = '0.5';
     locationImage.src = imageUrl;
     locationImage.alt = prompt;
+
+    locationImage.onload = () => {
+        locationImage.style.opacity = '1';
+    };
+
+    locationImage.onerror = () => {
+        console.warn('Не удалось загрузить изображение:', prompt);
+        locationImage.src = '';
+        locationImage.alt = 'Изображение недоступно';
+    };
 }
 
 // Включение/выключение интерфейса
