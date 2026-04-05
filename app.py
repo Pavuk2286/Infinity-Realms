@@ -31,11 +31,16 @@ START_PROMPT = load_prompt("start.txt")
 SETTING_PROMPT = load_prompt("setting.txt")
 
 
-def fix_truncated_json(content):
-    """Пытается исправить обрезанный JSON"""
+def clean_json_response(content):
+    """Извлекает JSON из ответа, убирая мусор и чиня обрезанный JSON"""
+    print(f"📥 Сырой ответ от модели: {content[:200]}...")
+
     content = content.strip()
 
-    # Если JSON полный, возвращаем как есть
+    # Убираем HTML-подобные теги
+    content = re.sub(r'<[^>]+>', '', content)
+
+    # 1. Если JSON полный — возвращаем
     if content.endswith("}"):
         try:
             json.loads(content)
@@ -43,39 +48,55 @@ def fix_truncated_json(content):
         except:
             pass
 
-    # Если обрезан на ключевом слове (например "image"), добавляем остаток
-    if content.endswith('"image'):
-        content += '_prompt": "generic scene"}'
-    elif content.endswith('"imag'):
-        content += 'e_prompt": "generic scene"}'
-    elif content.endswith('"im'):
-        content += 'age_prompt": "generic scene"}'
+    # 2. Ищем валидный JSON от { до }
+    start = content.find('{')
+    if start != -1:
+        for end in range(content.rfind('}'), start, -1):
+            candidate = content[start:end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except:
+                continue
 
-    # Пытаемся найти последнюю закрывающую скобку для массивов
-    # и добавляем недостающие закрывающие скобки
-    open_braces = content.count("{") - content.count("}")
-    open_brackets = content.count("[") - content.count("]")
-    open_quotes = content.count('"') % 2  # Нечётное = открытая кавычка
-
-    # Закрываем кавычки
-    if open_quotes:
-        content += '"'
-
-    # Закрываем скобки
-    content += "}" * open_braces
-    content += "]" * open_brackets
-
-    # Если всё ещё не валидный, пробуем извлечь JSON из начала
-    match = re.search(r"\{.*?\}", content, re.DOTALL)
-    if match:
-        candidate = match.group(0)
+    # 3. Если JSON обрезан — пытаемся починить
+    if start != -1:
+        fixed = content[start:]
+        
+        # Находим последнее корректное место (перед обрезанным текстом)
+        # Удаляем оборванный хвост после последней закрывающей скобки/кавычки
+        last_good = max(
+            fixed.rfind('}'),
+            fixed.rfind(']'),
+            fixed.rfind('"') if fixed.count('"') % 2 == 0 else fixed.rfind('"', 0, fixed.rfind('"'))
+        )
+        if last_good > 0 and last_good < len(fixed) - 5:
+            # Если есть большой хвост после последней хорошей позиции — обрезаем
+            potential = fixed[:last_good + 1]
+            # Проверяем не обрываем ли мы строку
+            if potential.count('"') % 2 == 0:
+                fixed = potential
+        
+        # Закрываем открытую кавычку
+        if fixed.count('"') % 2 != 0:
+            fixed += '"'
+        
+        # Закрываем незакрытые объекты/массивы
+        open_braces = fixed.count('{') - fixed.count('}')
+        open_brackets = fixed.count('[') - fixed.count(']')
+        fixed += '}' * open_braces + ']' * open_brackets
+        
         try:
-            json.loads(candidate)
-            return candidate
+            json.loads(fixed)
+            print(f"🔧 Починили обрезанный JSON")
+            return fixed
         except:
-            pass
+            # Если не вышло, пробуем минимальный fallback JSON
+            print(f"⚠️ Стандартная починка не сработала, используем fallback")
+            return '{"description": "Ошибка обработки ответа. Попробуйте другое действие.", "suggestions": ["Попробовать снова", "Начать заново"], "inventory": [], "effects": [], "image_prompt": "error terminal"}'
 
-    return content
+    print(f"❌ Не удалось извлечь JSON. Контент: {content[:300]}")
+    raise ValueError("Не удалось извлечь JSON из ответа")
 
 
 # Инициализация клиента OpenRouter
@@ -141,7 +162,7 @@ def handle_action():
             model=DEFAULT_MODEL,
             messages=messages,
             temperature=0.7,
-            max_tokens=400,  # Уменьшили для скорости
+            max_tokens=1000,  # Достаточно для полного JSON
             response_format={"type": "json_object"},
         )
 
@@ -150,8 +171,8 @@ def handle_action():
         if not content:
             raise ValueError("Пустой ответ от AI модели")
 
-        # Пытаемся исправить обрезанный JSON
-        content = fix_truncated_json(content)
+        # Извлекаем и чистим JSON
+        content = clean_json_response(content)
         qwen_response = json.loads(content)
 
         # Проверяем обязательные поля
@@ -228,15 +249,24 @@ def start_game():
                 model=DEFAULT_MODEL,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=400,
+                max_tokens=1000,
                 response_format={"type": "json_object"},
             )
 
+            # Проверяем на ошибки API
+            if hasattr(response_qwen, 'error') and response_qwen.error:
+                raise ValueError(f"Ошибка API: {response_qwen.error.get('message', 'Unknown')}")
+
+            if not response_qwen.choices:
+                raise ValueError("Пустой ответ от API (choices is None)")
+
             content = response_qwen.choices[0].message.content
+            print(f"📝 Content: '{content[:100]}...'")
+
             if not content:
                 raise ValueError("Пустой ответ от AI")
 
-            content = fix_truncated_json(content)
+            content = clean_json_response(content)
             response = json.loads(content)
 
             if "description" not in response:
@@ -268,6 +298,58 @@ def start_game():
             }
 
     return jsonify(response)
+
+
+@app.route("/api/image", methods=["GET"])
+def generate_image():
+    """Генерирует уникальное изображение через Pollinations (без кэша)"""
+    import requests as req
+    from urllib.parse import quote
+    import re
+
+    prompt = request.args.get("prompt", "scene")
+
+    try:
+        # Разбиваем слитные слова и чистим
+        spaced = re.sub(r'([a-z])([A-Z])', r'\1 \2', prompt)
+        spaced = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', spaced)
+        parts = []
+        for word in spaced.split():
+            if word.isupper() and len(word) > 6:
+                parts.extend([word[i:i+4] for i in range(0, len(word), 4)])
+            else:
+                parts.append(word)
+        clean = " ".join(parts)
+        clean = re.sub(r'[^a-zA-Z\s]', '', clean)
+        words = clean.split()[:6]
+        full_prompt = " ".join(words).lower()
+        print(f"🎨 '{prompt}' → '{full_prompt}'")
+
+        safe_prompt = quote(full_prompt)
+        # Уникальный seed = каждый раз новая картинка
+        url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=600&height=350&nologo=true&model=flux&seed={abs(hash(full_prompt + str(prompt)))}"
+
+        # 3 попытки
+        for attempt in range(3):
+            try:
+                response = req.get(url, timeout=60)
+                if response.status_code == 200:
+                    print(f"✅ Картинка готова (попытка {attempt + 1})")
+                    return response.content, 200, {
+                        "Content-Type": "image/jpeg",
+                        "Cache-Control": "no-store"
+                    }
+                else:
+                    print(f"⚠️ Pollinations вернул {response.status_code} (попытка {attempt + 1})")
+            except req.exceptions.Timeout:
+                print(f"⏳ Таймаут (попытка {attempt + 1}/3)")
+                continue
+        
+        print(f"❌ Pollinations не ответил за 3 попытки")
+        return b"", 200, {"Content-Type": "image/jpeg"}
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        return "Ошибка", 500
 
 
 @app.route("/api/setting", methods=["POST"])
@@ -313,7 +395,7 @@ def choose_setting():
             model=DEFAULT_MODEL,
             messages=messages,
             temperature=0.7,
-            max_tokens=400,
+            max_tokens=1000,
             response_format={"type": "json_object"},
         )
 
@@ -321,7 +403,7 @@ def choose_setting():
         if not content:
             raise ValueError("Пустой ответ от AI")
 
-        content = fix_truncated_json(content)
+        content = clean_json_response(content)
         response = json.loads(content)
 
         if "description" not in response:
